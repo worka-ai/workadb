@@ -19,6 +19,7 @@ OBJS = \
 	fastpath.o \
 	postgres.o \
 	pquery.o \
-	utility.o
+	utility.o \
+	workadb_embed.o
 
 include $(top_srcdir)/src/backend/common.mk

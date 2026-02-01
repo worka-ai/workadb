@@ -27,7 +27,8 @@ OBJS = \
 	pqcomm.o \
 	pqformat.o \
 	pqmq.o \
-	pqsignal.o
+	pqsignal.o \
+	workadb_io.o
 
 ifeq ($(with_ssl),openssl)
 OBJS += be-secure-openssl.o

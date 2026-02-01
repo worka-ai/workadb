@@ -1393,6 +1393,12 @@ exec_simple_query(const char *query_string)
 	debug_query_string = NULL;
 }
 
+void
+workadb_exec_simple_query(const char *sql)
+{
+	exec_simple_query(sql);
+}
+
 /*
  * exec_parse_message
  *

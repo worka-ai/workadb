@@ -173,6 +173,9 @@ RestoreArchivedFile(char *path, const char *xlogfname,
 	 * it is best to put any additional logic before or after the
 	 * PreRestoreCommand()/PostRestoreCommand() section.
 	 */
+#ifdef WORKADB_NO_SYSTEM
+	rc = -1;
+#else
 	PreRestoreCommand();
 
 	/*
@@ -181,6 +184,7 @@ RestoreArchivedFile(char *path, const char *xlogfname,
 	rc = system(xlogRestoreCmd);
 
 	PostRestoreCommand();
+#endif
 
 	pgstat_report_wait_end();
 	pfree(xlogRestoreCmd);
@@ -331,7 +335,11 @@ ExecuteRecoveryCommand(const char *command, const char *commandName,
 	 */
 	fflush(NULL);
 	pgstat_report_wait_start(wait_event_info);
+#ifdef WORKADB_NO_SYSTEM
+	rc = -1;
+#else
 	rc = system(xlogRecoveryCmd);
+#endif
 	pgstat_report_wait_end();
 
 	pfree(xlogRecoveryCmd);

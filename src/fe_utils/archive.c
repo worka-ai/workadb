@@ -54,7 +54,12 @@ RestoreArchivedFile(const char *path, const char *xlogfname,
 	 * archival storage.
 	 */
 	fflush(NULL);
+#ifdef WORKADB_NO_SYSTEM
+	pg_log_error("restore_command disabled (WORKADB_NO_SYSTEM)");
+	rc = -1;
+#else
 	rc = system(xlogRestoreCmd);
+#endif
 	pfree(xlogRestoreCmd);
 
 	if (rc == 0)

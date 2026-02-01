@@ -77,7 +77,11 @@ shell_archive_file(ArchiveModuleState *state, const char *file,
 
 	fflush(NULL);
 	pgstat_report_wait_start(WAIT_EVENT_ARCHIVE_COMMAND);
+#ifdef WORKADB_NO_SYSTEM
+	rc = -1;
+#else
 	rc = system(xlogarchcmd);
+#endif
 	pgstat_report_wait_end();
 
 	if (rc != 0)

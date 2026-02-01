@@ -28,6 +28,7 @@
 #include <arpa/inet.h>
 
 #include "libpq/libpq.h"
+#include "libpq/workadb_io.h"
 #include "miscadmin.h"
 #include "tcop/tcopprot.h"
 #include "utils/wait_event.h"
@@ -181,6 +182,9 @@ secure_read(Port *port, void *ptr, size_t len)
 	ssize_t		n;
 	int			waitfor;
 
+	if (workadb_io_is_enabled())
+		return workadb_io_read(port, ptr, len);
+
 	/* Deal with any already-pending interrupt condition. */
 	ProcessClientReadInterrupt(false);
 
@@ -306,6 +310,9 @@ secure_write(Port *port, void *ptr, size_t len)
 {
 	ssize_t		n;
 	int			waitfor;
+
+	if (workadb_io_is_enabled())
+		return workadb_io_write(port, ptr, len);
 
 	/* Deal with any already-pending interrupt condition. */
 	ProcessClientWriteInterrupt(false);

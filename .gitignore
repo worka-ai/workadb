@@ -57,3 +57,4 @@ pglite.html
 *.map
 pglite-wasm/excluded.imports
 *.symbols
+workadb/build
