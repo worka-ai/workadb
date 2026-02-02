@@ -332,7 +332,12 @@ workadb_prepare_data_dir(const char *data_dir, char *errbuf, size_t errlen)
 	file_major = strtol(file_version_string, &endptr, 10);
 	if (my_major != file_major)
 	{
-		workadb_set_error(errbuf, errlen, "PG_VERSION does not match server version");
+		snprintf(errbuf, errlen,
+				 "PG_VERSION mismatch for %s: data dir=%s (PG_VERSION=%s) server_major=%ld",
+				 pgversion_path,
+				 file_version_string,
+				 PG_VERSION,
+				 my_major);
 		return false;
 	}
 
