@@ -270,65 +270,36 @@ workadb_try_recover(struct wepg_engine *engine, char *errbuf, size_t errlen)
 {
     if (!engine || !engine->pgdata_path || !engine->temp_path)
         return 0;
-    /* Embedded mode: avoid spawning postgres. Only clean stale postmaster.pid
-       and optionally reset WAL when we see corruption indicators. */
+    /* Embedded mode: never attempt to SIGTERM random PIDs, and never run
+       destructive recovery actions by default. If a stale postmaster.pid is
+       present (common after an unclean shutdown), remove it and let crash
+       recovery proceed normally. */
 	{
 		char pid_path[1024];
-		FILE *fp = NULL;
-		long pid = -1;
 		snprintf(pid_path, sizeof(pid_path), "%s/postmaster.pid", engine->pgdata_path);
-		fp = fopen(pid_path, "r");
-		if (fp)
+		if (access(pid_path, F_OK) == 0)
 		{
-			if (fscanf(fp, "%ld", &pid) != 1)
-				pid = -1;
-			fclose(fp);
-			if (pid > 0)
+			if (unlink(pid_path) != 0)
 			{
-#ifndef _WIN32
-				if (kill((pid_t) pid, 0) != 0 && errno == ESRCH)
-				{
-					unlink(pid_path);
-				}
-				else
-				{
-					/* Embedded mode should not keep a postmaster; attempt a graceful stop. */
-					kill((pid_t) pid, SIGTERM);
-					for (int i = 0; i < 20; i++)
-					{
-						if (kill((pid_t) pid, 0) != 0 && errno == ESRCH)
-							break;
-						usleep(100000);
-					}
-					if (kill((pid_t) pid, 0) != 0 && errno == ESRCH)
-					{
-						unlink(pid_path);
-					}
-					else
-					{
-						snprintf(errbuf, errlen, "postmaster.pid exists for running pid %ld", pid);
-						return 0;
-					}
-				}
-#else
-				/* Best effort on Windows: remove stale pid. */
-				unlink(pid_path);
-#endif
-			}
-			else
-			{
-				unlink(pid_path);
+				snprintf(errbuf, errlen, "failed to remove postmaster.pid: %s", strerror(errno));
+				return 0;
 			}
 		}
 	}
 
 	if (errbuf && errbuf[0] != '\0')
 	{
-		if ((strstr(errbuf, "could not locate a valid checkpoint record") ||
+		const char *allow_resetwal = getenv("WORKADB_ALLOW_RESETWAL");
+		bool enabled = allow_resetwal && allow_resetwal[0] != '\0' &&
+					   (strcmp(allow_resetwal, "1") == 0 ||
+						strcasecmp(allow_resetwal, "true") == 0);
+
+		if (enabled &&
+			(strstr(errbuf, "could not locate a valid checkpoint record") ||
 			 strstr(errbuf, "invalid checkpoint record") ||
 			 strstr(errbuf, "unexpected zero page") ||
-			 strstr(errbuf, "recovery timeout"))
-			&& !engine->recovery_reset_attempted)
+			 strstr(errbuf, "recovery timeout")) &&
+			!engine->recovery_reset_attempted)
 		{
 			engine->recovery_reset_attempted = true;
 			if (workadb_run_resetwal(engine, errbuf, errlen))
