@@ -413,8 +413,14 @@ workadb_backend_start(const char *data_dir,
 		workadb_debug("InitializeFastPathLocks");
 		InitializeFastPathLocks();
 #else
-		workadb_debug("InitPostmasterChild");
-		InitPostmasterChild();
+		/*
+		 * Embedded mode runs the backend as a standalone process (no postmaster
+		 * parent and no death-monitoring pipe). Calling InitPostmasterChild()
+		 * would set IsUnderPostmaster=true and attempt to use
+		 * postmaster_alive_fds, leading to FATAL "read on postmaster death
+		 * monitoring pipe failed" on platforms like macOS/iOS.
+		 */
+		workadb_debug("SkipInitPostmasterChild");
 #endif
 		workadb_debug("process_shmem_requests");
 		process_shmem_requests();
