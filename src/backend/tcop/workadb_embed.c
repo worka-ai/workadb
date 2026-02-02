@@ -18,6 +18,7 @@
 #include "utils/guc.h"
 #include "storage/lock.h"
 #include "utils/memutils.h"
+#include "utils/timeout.h"
 #include "utils/timestamp.h"
 #include "postmaster/postmaster.h"
 #include "storage/fd.h"
@@ -442,6 +443,15 @@ workadb_backend_start(const char *data_dir,
 		workadb_init_port(database_name, user_name);
 		whereToSendOutput = DestNone;
 		SetProcessingMode(InitProcessing);
+
+		/*
+		 * Postgres expects timeout.c to be initialized in every backend.
+		 * Normally this is done in PostgresMain(); embedded mode doesn't call
+		 * that, so we must do it here to avoid corrupted timeout bookkeeping
+		 * (e.g. "timeout index -1 out of range").
+		 */
+		workadb_debug("InitializeTimeouts");
+		InitializeTimeouts();
 
 		workadb_debug("BaseInit");
 		BaseInit();

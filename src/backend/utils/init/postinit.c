@@ -756,15 +756,12 @@ InitPostgres(const char *in_dbname, Oid dboid,
 	 * Once I have done this, I am visible to other backends!
 	 */
 	InitProcessPhase2();
-puts("# 758:"__FILE__);
 	/*
 	 * Initialize my entry in the shared-invalidation manager's array of
 	 * per-backend data.
 	 */
 	SharedInvalBackendInit(false);
-puts("# 764:"__FILE__);
 	ProcSignalInit();
-puts("# 766:"__FILE__);
 	/*
 	 * Also set up timeout handlers needed for backend operation.  We need
 	 * these in every case except bootstrap.
