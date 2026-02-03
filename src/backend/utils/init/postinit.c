@@ -1395,7 +1395,6 @@ process_settings(Oid databaseid, Oid roleid)
 static void
 ShutdownPostgres(int code, Datum arg)
 {
-puts("# 1348: " __FILE__);
 	/* Make sure we've killed any active transaction */
 	AbortOutOfAnyTransaction();
 	/*
@@ -1403,7 +1402,6 @@ puts("# 1348: " __FILE__);
 	 * them explicitly.
 	 */
 	LockReleaseAll(USER_LOCKMETHOD, true);
-puts("# 1356: " __FILE__);
 }
 
 

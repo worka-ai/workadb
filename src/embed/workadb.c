@@ -409,30 +409,127 @@ static char *
 wepg_normalize_path(const char *path)
 {
 	char cwd[PATH_MAX];
-	char joined[PATH_MAX];
-	char *resolved = NULL;
+	char absbuf[PATH_MAX];
+	char candidate[PATH_MAX];
+	char *resolved_prefix = NULL;
+	char *result = NULL;
+	size_t len;
+	enum
+	{
+		WEPG_MAX_PATH_PARTS = (PATH_MAX / 2) + 1
+	};
+	char	   *parts[WEPG_MAX_PATH_PARTS];
+	int			nparts = 0;
+	int			i;
 
 	if (!path)
 		return NULL;
 
+	/* Build an absolute path first. */
 	if (path[0] == '/')
 	{
-		resolved = realpath(path, NULL);
-		if (resolved)
-			return resolved;
-		return strdup(path);
+		if (snprintf(absbuf, sizeof(absbuf), "%s", path) >= (int) sizeof(absbuf))
+			return NULL;
+	}
+	else
+	{
+		if (!getcwd(cwd, sizeof(cwd)))
+			return strdup(path);
+		if (snprintf(absbuf, sizeof(absbuf), "%s/%s", cwd, path) >= (int) sizeof(absbuf))
+			return strdup(path);
 	}
 
-	if (!getcwd(cwd, sizeof(cwd)))
-		return strdup(path);
+	/* Strip trailing slashes (except for root). */
+	len = strlen(absbuf);
+	while (len > 1 && absbuf[len - 1] == '/')
+	{
+		absbuf[len - 1] = '\0';
+		len--;
+	}
 
-	if (snprintf(joined, sizeof(joined), "%s/%s", cwd, path) >= (int) sizeof(joined))
-		return strdup(path);
+	/*
+	 * realpath() fails if the full path doesn't exist. To keep normalization
+	 * stable across "init if missing" flows, resolve the longest existing
+	 * prefix and append the remaining suffix components.
+	 */
+	resolved_prefix = realpath(absbuf, NULL);
+	if (resolved_prefix)
+		return resolved_prefix;
 
-	resolved = realpath(joined, NULL);
-	if (resolved)
-		return resolved;
-	return strdup(joined);
+	if (snprintf(candidate, sizeof(candidate), "%s", absbuf) >= (int) sizeof(candidate))
+		return strdup(absbuf);
+
+	memset(parts, 0, sizeof(parts));
+	while (!resolved_prefix)
+	{
+		char *slash;
+		const char *part;
+
+		resolved_prefix = realpath(candidate, NULL);
+		if (resolved_prefix)
+			break;
+
+		if (!(errno == ENOENT || errno == ENOTDIR))
+			break;
+
+		slash = strrchr(candidate, '/');
+		if (!slash)
+			break;
+
+		part = slash + 1;
+		if (*part == '\0')
+			break;
+		if (nparts >= (int) WEPG_MAX_PATH_PARTS)
+			break;
+
+		parts[nparts++] = strdup(part);
+		*slash = '\0';
+		if (candidate[0] == '\0')
+			snprintf(candidate, sizeof(candidate), "%s", "/");
+	}
+
+	if (!resolved_prefix)
+	{
+		for (i = 0; i < nparts; i++)
+			free(parts[i]);
+		return strdup(absbuf);
+	}
+
+	{
+		size_t out_len = strlen(resolved_prefix);
+		for (i = nparts - 1; i >= 0; i--)
+		{
+			out_len += 1 + strlen(parts[i]);
+			if (i == 0)
+				break;
+		}
+
+		result = (char *) malloc(out_len + 1);
+		if (!result)
+		{
+			for (i = 0; i < nparts; i++)
+				free(parts[i]);
+			free(resolved_prefix);
+			return strdup(absbuf);
+		}
+
+		strcpy(result, resolved_prefix);
+		free(resolved_prefix);
+		resolved_prefix = NULL;
+
+		for (i = nparts - 1; i >= 0; i--)
+		{
+			size_t cur = strlen(result);
+			if (cur == 0 || result[cur - 1] != '/')
+				strcat(result, "/");
+			strcat(result, parts[i]);
+			free(parts[i]);
+			if (i == 0)
+				break;
+		}
+	}
+
+	return result;
 }
 
 static wepg_status
@@ -499,13 +596,16 @@ wepg_singleton_acquire(const char *pgdata_path, uint32_t flags, wepg_singleton *
 		return WEPG_ERR_INTERNAL;
 	}
 
-	if (strcmp(singleton->pgdata_path, normalized) != 0)
-	{
-		pthread_mutex_unlock(&wepg_singleton_mutex);
-		free(normalized);
-		wepg_set_error_buf(errbuf, errlen, "workadb already initialized with different pgdata path");
-		return WEPG_ERR_INCOMPATIBLE_PGDATA;
-	}
+		if (strcmp(singleton->pgdata_path, normalized) != 0)
+		{
+			snprintf(errbuf, errlen,
+					 "workadb already initialized with different pgdata path: existing=\"%s\" new=\"%s\"",
+					 singleton->pgdata_path ? singleton->pgdata_path : "(null)",
+					 normalized ? normalized : "(null)");
+			pthread_mutex_unlock(&wepg_singleton_mutex);
+			free(normalized);
+			return WEPG_ERR_INCOMPATIBLE_PGDATA;
+		}
 	if ((flags & mask) != singleton->flags)
 	{
 		pthread_mutex_unlock(&wepg_singleton_mutex);
@@ -764,7 +864,7 @@ wepg_abi_version(void) {
 
 const char *
 wepg_version_string(void) {
-    return "workadb/0.1 pg=18.1";
+	    return "workadb/0.1 pg=" PG_VERSION;
 }
 
 void
@@ -2026,7 +2126,7 @@ worka_set_logger(worka_log_fn fn, void *ctx)
 worka_status
 worka_open(const worka_config *config, worka_handle *out)
 {
-	if (!config || !out || !config->pgdata_path)
+	if (!config || !out || !config->pgdata_path || config->pgdata_path[0] == '\0')
 		return WEPG_ERR_INVALID_CONFIG;
 
 	if ((config->flags & WEPG_FLAG_NO_AUTO_INITDB) != 0 &&

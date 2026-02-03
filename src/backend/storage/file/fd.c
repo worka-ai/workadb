@@ -711,10 +711,9 @@ pg_ftruncate(int fd, off_t length)
 	int			ret;
 
 retry:
-	ret = ftruncate(fd, length);
-printf("# 670 pg_ftruncate(int fd=%d, off_t length=%lld)=%d\n" __FILE__, fd, length, ret);
-	if (ret == -1 && errno == EINTR)
-		goto retry;
+		ret = ftruncate(fd, length);
+		if (ret == -1 && errno == EINTR)
+			goto retry;
 
 	return ret;
 }
