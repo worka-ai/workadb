@@ -742,10 +742,9 @@ pg_truncate(const char *path, off_t length)
 #else
 
 retry:
-	ret = truncate(path, length);
-printf("# 670 pg_truncate(path=%s, off_t length=%lld)=%d\n" __FILE__, path, length, ret);
-	if (ret == -1 && errno == EINTR)
-		goto retry;
+		ret = truncate(path, length);
+		if (ret == -1 && errno == EINTR)
+			goto retry;
 #endif
 
 	return ret;
