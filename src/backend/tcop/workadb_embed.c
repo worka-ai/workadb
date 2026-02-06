@@ -20,6 +20,7 @@
 #include "utils/memutils.h"
 #include "utils/timeout.h"
 #include "utils/timestamp.h"
+#include "utils/timeout.h"
 #include "postmaster/postmaster.h"
 #include "storage/fd.h"
 #include "common/file_perm.h"
@@ -384,6 +385,8 @@ workadb_backend_start(const char *data_dir,
 
 		workadb_debug("InitializeGUCOptions");
 		InitializeGUCOptions();
+		workadb_debug("InitializeTimeouts");
+		InitializeTimeouts();
 		SetDataDir(data_dir);
 
 		workadb_debug("SelectConfigFiles");
@@ -401,6 +404,8 @@ workadb_backend_start(const char *data_dir,
 					 errmsg("%s", errbuf)));
 		workadb_debug("ChangeToDataDir");
 		ChangeToDataDir();
+		workadb_debug("CreateDataDirLockFile");
+		CreateDataDirLockFile(false);
 		workadb_debug("LocalProcessControlFile");
 		LocalProcessControlFile(false);
 
@@ -828,6 +833,7 @@ workadb_backend_exec_sql(const uint8_t *sql_bytes,
 	PG_CATCH();
 	{
 		ErrorData  *edata = workadb_copy_error_data();
+		int			elevel = edata ? edata->elevel : ERROR;
 
 		if (sql)
 		{
@@ -838,6 +844,19 @@ workadb_backend_exec_sql(const uint8_t *sql_bytes,
 			SPI_finish();
 		if (snapshot_pushed && ActiveSnapshotSet())
 			PopActiveSnapshot();
+
+		/*
+		 * In embedded mode, FATAL/PANIC are rethrown instead of exiting the
+		 * host process. Bubble them up to the outer embedder handler so it can
+		 * reset the embedded backend safely.
+		 */
+		if (elevel >= FATAL && getenv("WORKADB_EMBEDDED") != NULL && PG_exception_stack != NULL)
+		{
+			if (edata)
+				FreeErrorData(edata);
+			PG_RE_THROW();
+		}
+
 		AbortCurrentTransaction();
 		FlushErrorState();
 		workadb_set_error(errbuf, errlen, edata->message);
@@ -1070,6 +1089,7 @@ workadb_backend_exec_sql_params(const uint8_t *sql_bytes,
 	PG_CATCH();
 	{
 		ErrorData  *edata = workadb_copy_error_data();
+		int			elevel = edata ? edata->elevel : ERROR;
 
 		if (sql)
 		{
@@ -1080,6 +1100,14 @@ workadb_backend_exec_sql_params(const uint8_t *sql_bytes,
 			SPI_finish();
 		if (snapshot_pushed && ActiveSnapshotSet())
 			PopActiveSnapshot();
+
+		if (elevel >= FATAL && getenv("WORKADB_EMBEDDED") != NULL && PG_exception_stack != NULL)
+		{
+			if (edata)
+				FreeErrorData(edata);
+			PG_RE_THROW();
+		}
+
 		AbortCurrentTransaction();
 		FlushErrorState();
 		workadb_set_error(errbuf, errlen, edata->message);

@@ -86,7 +86,8 @@ pub struct wepg_response {
     pub rows: i64,
 }
 
-pub type wepg_log_fn = Option<unsafe extern "C" fn(level: c_int, msg: *const c_char, ctx: *mut c_void)>;
+pub type wepg_log_fn =
+    Option<unsafe extern "C" fn(level: c_int, msg: *const c_char, ctx: *mut c_void)>;
 
 unsafe extern "C" {
     pub fn wepg_abi_version() -> u32;
@@ -95,8 +96,16 @@ unsafe extern "C" {
 
     pub fn wepg_init(config: *const wepg_config, out: *mut wepg_handle) -> wepg_status;
     pub fn wepg_initdb(handle: wepg_handle) -> wepg_status;
-    pub fn wepg_step(handle: wepg_handle, request: *const wepg_request, response: *mut wepg_response) -> wepg_status;
-    pub fn wepg_step_params(handle: wepg_handle, request: *const wepg_request_params, response: *mut wepg_response) -> wepg_status;
+    pub fn wepg_step(
+        handle: wepg_handle,
+        request: *const wepg_request,
+        response: *mut wepg_response,
+    ) -> wepg_status;
+    pub fn wepg_step_params(
+        handle: wepg_handle,
+        request: *const wepg_request_params,
+        response: *mut wepg_response,
+    ) -> wepg_status;
     pub fn wepg_reset(handle: wepg_handle) -> wepg_status;
     pub fn wepg_shutdown(handle: wepg_handle) -> wepg_status;
     pub fn wepg_last_error(handle: wepg_handle) -> *const c_char;

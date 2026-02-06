@@ -711,9 +711,9 @@ pg_ftruncate(int fd, off_t length)
 	int			ret;
 
 retry:
-		ret = ftruncate(fd, length);
-		if (ret == -1 && errno == EINTR)
-			goto retry;
+	ret = ftruncate(fd, length);
+	if (ret == -1 && errno == EINTR)
+		goto retry;
 
 	return ret;
 }
@@ -742,9 +742,9 @@ pg_truncate(const char *path, off_t length)
 #else
 
 retry:
-		ret = truncate(path, length);
-		if (ret == -1 && errno == EINTR)
-			goto retry;
+	ret = truncate(path, length);
+	if (ret == -1 && errno == EINTR)
+		goto retry;
 #endif
 
 	return ret;

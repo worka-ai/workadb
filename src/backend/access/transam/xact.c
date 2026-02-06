@@ -1761,7 +1761,6 @@ RecordTransactionAbort(bool isSubXact)
 	if (TransactionIdDidCommit(xid))
 		elog(PANIC, "cannot abort transaction %u, it was already committed",
 			 xid);
-	else elog(WARNING, "# 1743: aborting transaction %u", xid);
 
 	/*
 	 * Are we using the replication origins feature?  Or, in other words, are

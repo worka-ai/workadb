@@ -78,6 +78,18 @@ static volatile sig_atomic_t alarm_enabled = false;
 static volatile sig_atomic_t signal_pending = false;
 static volatile TimestampTz signal_due_at = 0;
 
+/*
+ * In embedded mode (libworkadb inside a multithreaded host process), using
+ * SIGALRM is unsafe because the signal can be delivered to any thread.  The
+ * Postgres timeout subsystem is not thread-safe, and SIGALRM handlers can
+ * corrupt shared timeout state when invoked on non-backend threads.
+ *
+ * We still initialize timeout bookkeeping so that RegisterTimeout() and
+ * enable/disable_timeout() calls are safe, but we do not install a SIGALRM
+ * handler and we never call setitimer().
+ */
+static bool workadb_disable_sigalrm = false;
+
 
 /*****************************************************************************
  * Internal helper functions
@@ -221,9 +233,19 @@ static void
 schedule_alarm(TimestampTz now)
 {
 #if defined(__wasi__)
-    puts("# 224: schedule_alarm(TimestampTz now)");
-    (void)signal_due_at;
+	(void) signal_due_at;
 #else
+	if (workadb_disable_sigalrm)
+	{
+		/*
+		 * Ensure timeout bookkeeping stays consistent, but don't schedule a
+		 * process-global timer in embedded mode.
+		 */
+		disable_alarm();
+		signal_pending = false;
+		return;
+	}
+
 	if (num_active_timeouts > 0)
 	{
 		struct itimerval timeval;
@@ -489,6 +511,7 @@ InitializeTimeouts(void)
 
 	/* Initialize, or re-initialize, all local state */
 	disable_alarm();
+	workadb_disable_sigalrm = false;
 
 	num_active_timeouts = 0;
 
@@ -504,6 +527,13 @@ InitializeTimeouts(void)
 	}
 
 	all_timeouts_initialized = true;
+
+	/* Embedded: never install SIGALRM handler or schedule alarms. */
+	if (getenv("WORKADB_EMBEDDED") != NULL)
+	{
+		workadb_disable_sigalrm = true;
+		return;
+	}
 
 	/* Now establish the signal handler */
 	pqsignal(SIGALRM, handle_sig_alarm);

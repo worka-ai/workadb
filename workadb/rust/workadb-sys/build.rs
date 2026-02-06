@@ -122,10 +122,7 @@ fn main() -> anyhow::Result<()> {
     println!("cargo:rustc-link-lib=static=workadb");
     if target.contains("apple") {
         let archive = lib_dir.join("libworkadb.a");
-        println!(
-            "cargo:rustc-link-arg=-Wl,-force_load,{}",
-            archive.display()
-        );
+        println!("cargo:rustc-link-arg=-Wl,-force_load,{}", archive.display());
         let linked = if platform == "macos" {
             link_icu_from_pkg_config() || link_icu_from_homebrew()
         } else {
@@ -208,10 +205,7 @@ fn link_icu_from_pkg_config() -> bool {
 }
 
 fn link_icu_from_homebrew() -> bool {
-    let candidates = [
-        "/opt/homebrew/opt/icu4c/lib",
-        "/usr/local/opt/icu4c/lib",
-    ];
+    let candidates = ["/opt/homebrew/opt/icu4c/lib", "/usr/local/opt/icu4c/lib"];
     for dir in candidates {
         let lib_path = Path::new(dir).join("libicuuc.dylib");
         if !lib_path.exists() {

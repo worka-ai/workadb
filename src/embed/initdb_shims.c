@@ -1,10 +1,15 @@
 #include "postgres_fe.h"
 
+#include <dirent.h>
+#include <errno.h>
 #include <signal.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#include <fcntl.h>
 
 #include "common/fe_memutils.h"
 #include "common/file_utils.h"
@@ -23,6 +28,8 @@ const char *select_default_timezone(const char *share_path);
 extern const char *pg_encoding_to_char_private(int encoding);
 extern int pg_valid_server_encoding_private(const char *name);
 extern int pg_valid_server_encoding_id_private(int encoding);
+int workadb_find_other_exec(const char *argv0, const char *target,
+							const char *versionstr, char *retpath);
 
 static void *
 pg_malloc_internal(size_t size, int flags)
@@ -150,9 +157,191 @@ void
 sync_pgdata(const char *pg_data, int serverVersion,
 			DataDirSyncMethod sync_method)
 {
-	(void) pg_data;
 	(void) serverVersion;
-	(void) sync_method;
+
+	if (!pg_data || pg_data[0] == '\0')
+		return;
+
+	switch (sync_method)
+	{
+		case DATA_DIR_SYNC_METHOD_SYNCFS:
+			{
+#ifdef HAVE_SYNCFS
+				int fd;
+
+				fd = open(pg_data, O_RDONLY, 0);
+				if (fd < 0)
+				{
+					pg_log_error("could not open file \"%s\": %m", pg_data);
+					exit(EXIT_FAILURE);
+				}
+
+				if (syncfs(fd) < 0)
+				{
+					pg_log_error("could not synchronize file system for file \"%s\": %m", pg_data);
+					(void) close(fd);
+					exit(EXIT_FAILURE);
+				}
+
+				(void) close(fd);
+				return;
+#else
+				pg_log_error("this build does not support sync method \"%s\"", "syncfs");
+				exit(EXIT_FAILURE);
+#endif
+			}
+
+		case DATA_DIR_SYNC_METHOD_FSYNC:
+			{
+				/* fall through to recursive fsync implementation below */
+			}
+			break;
+	}
+
+	/*
+	 * Recursive fsync of all files and directories under pg_data.
+	 *
+	 * This intentionally avoids relying on fsync_fname()/file_utils.c because
+	 * libworkadb links a minimal frontend subset. For initdb durability we
+	 * fsync regular files and then fsync directories after their contents.
+	 */
+	{
+		/* Simple post-order walk */
+		struct workadb_sync_stack_item
+		{
+			char path[MAXPGPATH];
+			bool entered;
+			struct workadb_sync_stack_item *next;
+		};
+
+		struct workadb_sync_stack_item *stack = NULL;
+		struct workadb_sync_stack_item *item;
+
+		item = (struct workadb_sync_stack_item *) pg_malloc0(sizeof(*item));
+		snprintf(item->path, sizeof(item->path), "%s", pg_data);
+		item->entered = false;
+		item->next = NULL;
+		stack = item;
+
+		while (stack)
+		{
+			struct workadb_sync_stack_item *cur = stack;
+			stack = cur->next;
+
+			if (!cur->entered)
+			{
+				DIR *dir;
+				struct dirent *de;
+
+				/* Push directory for fsync after children */
+				cur->entered = true;
+				cur->next = stack;
+				stack = cur;
+
+				dir = opendir(cur->path);
+				if (!dir)
+				{
+					pg_log_error("could not open directory \"%s\": %m", cur->path);
+					exit(EXIT_FAILURE);
+				}
+
+				while (errno = 0, (de = readdir(dir)) != NULL)
+				{
+					char subpath[MAXPGPATH];
+					struct stat st;
+
+					if (strcmp(de->d_name, ".") == 0 || strcmp(de->d_name, "..") == 0)
+						continue;
+
+					if (snprintf(subpath, sizeof(subpath), "%s/%s", cur->path, de->d_name) >= (int) sizeof(subpath))
+					{
+						pg_log_error("path too long while syncing data directory");
+						(void) closedir(dir);
+						exit(EXIT_FAILURE);
+					}
+
+					if (lstat(subpath, &st) < 0)
+					{
+						pg_log_error("could not stat file \"%s\": %m", subpath);
+						(void) closedir(dir);
+						exit(EXIT_FAILURE);
+					}
+
+					if (S_ISDIR(st.st_mode))
+					{
+						struct workadb_sync_stack_item *child;
+						child = (struct workadb_sync_stack_item *) pg_malloc0(sizeof(*child));
+						snprintf(child->path, sizeof(child->path), "%s", subpath);
+						child->entered = false;
+						child->next = stack;
+						stack = child;
+					}
+					else if (S_ISREG(st.st_mode))
+					{
+						int fd;
+
+						fd = open(subpath, O_RDONLY, 0);
+						if (fd < 0)
+						{
+							pg_log_error("could not open file \"%s\": %m", subpath);
+							(void) closedir(dir);
+							exit(EXIT_FAILURE);
+						}
+
+						if (fsync(fd) != 0)
+						{
+							pg_log_error("could not fsync file \"%s\": %m", subpath);
+							(void) close(fd);
+							(void) closedir(dir);
+							exit(EXIT_FAILURE);
+						}
+						(void) close(fd);
+					}
+					/* ignore symlinks and special files */
+				}
+
+				if (errno)
+				{
+					pg_log_error("could not read directory \"%s\": %m", cur->path);
+					(void) closedir(dir);
+					exit(EXIT_FAILURE);
+				}
+
+				(void) closedir(dir);
+			}
+			else
+			{
+				int fd;
+				int flags = O_RDONLY;
+
+#ifdef O_DIRECTORY
+				flags |= O_DIRECTORY;
+#endif
+				fd = open(cur->path, flags, 0);
+				if (fd < 0)
+				{
+					pg_log_error("could not open directory \"%s\": %m", cur->path);
+					exit(EXIT_FAILURE);
+				}
+
+				if (fsync(fd) != 0)
+				{
+					/*
+					 * Some platforms/filesystems don't support fsync on
+					 * directories; treat that as non-fatal.
+					 */
+					if (errno != EINVAL)
+					{
+						pg_log_error("could not fsync directory \"%s\": %m", cur->path);
+						(void) close(fd);
+						exit(EXIT_FAILURE);
+					}
+				}
+				(void) close(fd);
+				pg_free(cur);
+			}
+		}
+	}
 }
 
 pqsigfunc

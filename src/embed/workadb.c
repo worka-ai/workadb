@@ -765,71 +765,105 @@ wepg_worker_main(void *arg)
 				const char *db_name = "worka";
 				const char *user_name = "worka";
 				bool backend_started = false;
+				volatile bool ok = true;
 				wepg_log_sql_preview(task->sql_bytes, task->sql_len, task->param_count);
-				if (!task->engine->recovery_attempted
-					&& wepg_pgdata_exists(task->engine->pgdata_path))
+				PG_TRY();
 				{
-					task->engine->recovery_attempted = true;
-					wepg_log_message(15, "workadb preflight recovery check");
-					if (!workadb_try_recover(task->engine, task->errbuf, sizeof(task->errbuf)))
-					{
-						task->status = WEPG_ERR_EXEC_FAILED;
-						wepg_log_message(15, task->errbuf);
-						break;
-					}
-				}
-				backend_started = workadb_backend_start(task->engine->pgdata_path, db_name,
-														user_name, task->errbuf,
-														sizeof(task->errbuf));
-				if (!backend_started && !task->engine->recovery_attempted)
-				{
-					task->engine->recovery_attempted = true;
-					wepg_log_message(15, "workadb backend start failed, attempting recovery");
-					if (workadb_try_recover(task->engine, task->errbuf, sizeof(task->errbuf)))
-					{
+					do {
+						if (!task->engine->recovery_attempted
+							&& wepg_pgdata_exists(task->engine->pgdata_path))
+						{
+							task->engine->recovery_attempted = true;
+							wepg_log_message(15, "workadb preflight recovery check");
+							if (!workadb_try_recover(task->engine, task->errbuf, sizeof(task->errbuf)))
+							{
+								task->status = WEPG_ERR_EXEC_FAILED;
+								ok = false;
+								break;
+							}
+						}
+
 						backend_started = workadb_backend_start(task->engine->pgdata_path, db_name,
 																user_name, task->errbuf,
 																sizeof(task->errbuf));
-					}
+						if (!backend_started && !task->engine->recovery_attempted)
+						{
+							task->engine->recovery_attempted = true;
+							wepg_log_message(15, "workadb backend start failed, attempting recovery");
+							if (workadb_try_recover(task->engine, task->errbuf, sizeof(task->errbuf)))
+							{
+								backend_started = workadb_backend_start(task->engine->pgdata_path, db_name,
+																		user_name, task->errbuf,
+																		sizeof(task->errbuf));
+							}
+						}
+						if (!backend_started)
+						{
+							task->status = WEPG_ERR_EXEC_FAILED;
+							ok = false;
+							break;
+						}
+
+						if (task->param_count > 0)
+						{
+							if (!workadb_backend_exec_sql_params(task->sql_bytes,
+																task->sql_len,
+																task->params,
+																task->param_count,
+																task->out_bytes,
+																task->out_cap,
+																&task->out_len,
+																&task->out_rows,
+																task->errbuf,
+																sizeof(task->errbuf)))
+							{
+								task->status = WEPG_ERR_EXEC_FAILED;
+								ok = false;
+								break;
+							}
+						}
+						else if (!workadb_backend_exec_sql(task->sql_bytes,
+															task->sql_len,
+															task->out_bytes,
+															task->out_cap,
+															&task->out_len,
+															&task->out_rows,
+															task->errbuf,
+															sizeof(task->errbuf)))
+						{
+							task->status = WEPG_ERR_EXEC_FAILED;
+							ok = false;
+							break;
+						}
+
+						task->status = WEPG_OK;
+					} while (0);
 				}
-				if (!backend_started)
+				PG_CATCH();
 				{
+					ErrorData *edata = CopyErrorData();
+
+					FlushErrorState();
 					task->status = WEPG_ERR_EXEC_FAILED;
+					ok = false;
+
+					if (edata && edata->message)
+						snprintf(task->errbuf, sizeof(task->errbuf), "%s", edata->message);
+					else
+						snprintf(task->errbuf, sizeof(task->errbuf), "workadb execution failed");
+
+					if (edata)
+						FreeErrorData(edata);
+
+					/* Defensive: reset embedded backend state after uncaught ERROR. */
+					workadb_io_reset();
+					workadb_backend_shutdown();
+				}
+				PG_END_TRY();
+
+				if (!ok && task->errbuf[0] != '\0')
 					wepg_log_message(15, task->errbuf);
-					break;
-				}
-				if (task->param_count > 0)
-				{
-					if (!workadb_backend_exec_sql_params(task->sql_bytes,
-														task->sql_len,
-														task->params,
-														task->param_count,
-														task->out_bytes,
-														task->out_cap,
-														&task->out_len,
-														&task->out_rows,
-														task->errbuf,
-														sizeof(task->errbuf)))
-					{
-						task->status = WEPG_ERR_EXEC_FAILED;
-						wepg_log_message(15, task->errbuf);
-						break;
-					}
-				}
-				else if (!workadb_backend_exec_sql(task->sql_bytes,
-													task->sql_len,
-													task->out_bytes,
-													task->out_cap,
-													&task->out_len,
-													&task->out_rows,
-													task->errbuf,
-													sizeof(task->errbuf)))
-				{
-					task->status = WEPG_ERR_EXEC_FAILED;
-					wepg_log_message(15, task->errbuf);
-					break;
-				}
-				task->status = WEPG_OK;
+
 				break;
 			}
 			case WEPG_TASK_RESET:
@@ -864,7 +898,7 @@ wepg_abi_version(void) {
 
 const char *
 wepg_version_string(void) {
-	    return "workadb/0.1 pg=" PG_VERSION;
+    return "workadb/0.1 pg=" PG_VERSION;
 }
 
 void
@@ -1880,7 +1914,6 @@ wepg_initdb_internal(struct wepg_engine *engine, char *errbuf, size_t errlen) {
 		argv[argc++] = "initdb";
 		argv[argc++] = "-D";
 		argv[argc++] = data_arg;
-		argv[argc++] = "--no-sync";
 		argv[argc] = NULL;
 
 		if (workadb_initdb_run(argc, argv) != 0)

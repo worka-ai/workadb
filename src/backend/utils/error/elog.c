@@ -517,6 +517,26 @@ errfinish(const char *filename, int lineno, const char *funcname)
 		econtext->callback(econtext->arg);
 
 	/*
+	 * Embedded mode (libworkadb) runs the backend inside a host process.  In
+	 * this environment we must never call proc_exit() or abort() on FATAL or
+	 * PANIC, since that would terminate the entire application.
+	 *
+	 * Instead, if there's an exception handler installed, treat FATAL+ like
+	 * ERROR and rethrow so the embedder can surface the error and restart the
+	 * embedded backend on its owning thread.
+	 */
+	if (elevel >= FATAL &&
+		getenv("WORKADB_EMBEDDED") != NULL &&
+		PG_exception_stack != NULL)
+	{
+		InterruptHoldoffCount = 0;
+		QueryCancelHoldoffCount = 0;
+		CritSectionCount = 0;
+		recursion_depth--;
+		PG_RE_THROW();
+	}
+
+	/*
 	 * If ERROR (not more nor less) we pass it off to the current handler.
 	 * Printing it and popping the stack is the responsibility of the handler.
 	 */
@@ -705,7 +725,6 @@ errsave_finish(struct Node *context, const char *filename, int lineno,
 	 */
 	if (edata->elevel >= ERROR)
 	{
-puts("#712");
 		errfinish(filename, lineno, funcname);
 		pg_unreachable();
 	}

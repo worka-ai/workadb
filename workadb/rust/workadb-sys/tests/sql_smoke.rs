@@ -5,7 +5,7 @@ use std::sync::{Mutex, Once};
 
 use libc::{c_char, c_int, c_void};
 
-use workadb_sys::{wepg_set_logger, Workadb, WorkadbConfig};
+use workadb_sys::{Workadb, WorkadbConfig, wepg_set_logger};
 
 static INIT: Once = Once::new();
 static TEST_LOCK: Mutex<()> = Mutex::new(());
@@ -57,9 +57,7 @@ fn sql_suite() {
     run_case!(
         "CREATE TABLE properties (id INT PRIMARY KEY, name TEXT NOT NULL, city TEXT NOT NULL);"
     );
-    run_case!(
-        "CREATE TABLE tenants (id INT PRIMARY KEY, name TEXT NOT NULL, phone TEXT);"
-    );
+    run_case!("CREATE TABLE tenants (id INT PRIMARY KEY, name TEXT NOT NULL, phone TEXT);");
     run_case!(
         "CREATE TABLE leases (id INT PRIMARY KEY, property_id INT NOT NULL REFERENCES properties(id), tenant_id INT NOT NULL REFERENCES tenants(id), start_date DATE, end_date DATE);"
     );
@@ -117,8 +115,7 @@ fn sql_suite() {
     let frame = run_case!("SELECT COUNT(*) FROM issues WHERE status = 'open';");
     assert_eq!(frame.rows[0][0].as_deref(), Some("2"));
 
-    let frame =
-        run_case!("UPDATE issues SET status='closed', closed_at=NOW() WHERE id=100;");
+    let frame = run_case!("UPDATE issues SET status='closed', closed_at=NOW() WHERE id=100;");
     assert_eq!(frame.row_count, 1);
     let frame = run_case!("SELECT COUNT(*) FROM issues WHERE status = 'open';");
     assert_eq!(frame.rows[0][0].as_deref(), Some("1"));
@@ -130,9 +127,8 @@ fn sql_suite() {
         "SELECT id, CASE WHEN status='closed' THEN 'done' ELSE 'todo' END FROM issues ORDER BY id;"
     );
     assert_eq!(frame.rows.len(), 2);
-    let frame = run_case!(
-        "SELECT id, COALESCE(closed_at::date::text, 'open') FROM issues ORDER BY id;"
-    );
+    let frame =
+        run_case!("SELECT id, COALESCE(closed_at::date::text, 'open') FROM issues ORDER BY id;");
     assert_eq!(frame.rows.len(), 2);
     let frame = run_case!("SELECT id, title FROM issues ORDER BY id DESC LIMIT 1;");
     assert_eq!(frame.rows[0][0].as_deref(), Some("101"));
@@ -162,9 +158,7 @@ fn sql_suite() {
         "INSERT INTO issues (id, lease_id, title) VALUES (102, 20, 'Leaky tap') RETURNING id;"
     );
     assert_eq!(frame.rows[0][0].as_deref(), Some("102"));
-    let frame = run_case!(
-        "UPDATE issues SET status='in_progress' WHERE id=101 RETURNING status;"
-    );
+    let frame = run_case!("UPDATE issues SET status='in_progress' WHERE id=101 RETURNING status;");
     assert_eq!(frame.rows[0][0].as_deref(), Some("in_progress"));
     let frame = run_case!("DELETE FROM issues WHERE id=102 RETURNING id;");
     assert_eq!(frame.rows[0][0].as_deref(), Some("102"));
@@ -190,9 +184,8 @@ fn sql_suite() {
     assert_eq!(frame.rows[0][0].as_deref(), Some("temp"));
     run_case!("DROP TABLE temp_events;");
 
-    let frame = run_case!(
-        "INSERT INTO issues (id, lease_id, title) VALUES (103, 20, 'Leak under sink');"
-    );
+    let frame =
+        run_case!("INSERT INTO issues (id, lease_id, title) VALUES (103, 20, 'Leak under sink');");
     assert_eq!(frame.row_count, 1);
     let frame = run_case!("UPDATE issues SET title='Leak under sink (edited)' WHERE id=103;");
     assert_eq!(frame.row_count, 1);
@@ -207,8 +200,7 @@ fn sql_suite() {
     let frame = run_case!("SELECT COUNT(*) FROM issues WHERE id=103;");
     assert_eq!(frame.rows[0][0].as_deref(), Some("0"));
 
-    let frame =
-        run_case!("SELECT EXISTS (SELECT 1 FROM issues WHERE status <> 'closed');");
+    let frame = run_case!("SELECT EXISTS (SELECT 1 FROM issues WHERE status <> 'closed');");
     assert_eq!(frame.rows[0][0].as_deref(), Some("t"));
     let frame = run_case!(
         "SELECT id FROM issues WHERE id IN (SELECT issue_id FROM issue_notes) ORDER BY id;"
@@ -243,10 +235,7 @@ fn sql_suite() {
         .expect("select persisted");
     assert_eq!(frame.rows[0][0].as_deref(), Some("hello"));
 
-    assert!(
-        case_id >= 50,
-        "expected at least 50 cases, got {case_id}"
-    );
+    assert!(case_id >= 50, "expected at least 50 cases, got {case_id}");
 
     eprintln!("workadb test: shutdown");
     reopen_engine.shutdown().expect("shutdown workadb");

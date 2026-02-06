@@ -334,6 +334,15 @@ if (code!=66){
 static void
 atexit_callback(void)
 {
+	/*
+	 * In embedded mode (libworkadb loaded into a multithreaded host), we must
+	 * not run Postgres process-exit cleanup from an arbitrary thread at
+	 * process termination. The host is responsible for calling explicit
+	 * workadb shutdown APIs on the owning worker thread.
+	 */
+	if (getenv("WORKADB_EMBEDDED") != NULL)
+		return;
+
 	/* Clean up everything that must be cleaned up */
 	/* ... too bad we don't know the real exit code ... */
 	proc_exit_prepare(-1);
